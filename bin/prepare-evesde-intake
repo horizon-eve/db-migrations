@@ -22,9 +22,9 @@ echo Create refined dump $INTAKE_DUMP
 pg_dump -v -d $DBNAME -Fc --schema=$SCHEMANAME -f $INTAKE_DUMP
 
 echo Decom evesd0 data
-psql -d $DBNAME -a -c "call cleanup_dump_data('${SCHEMANAME}')"
-psql -d $DBNAME -a -c "call cleanup_dump_data('${$DBNAME}')"
-psql -d $DBNAME -a -c "call cleanup_dump_data('yaml')"
+psql -d $DBNAME -a -c "select cleanup_dump_data('${SCHEMANAME}')"
+psql -d $DBNAME -a -c "select cleanup_dump_data('${$DBNAME}')"
+psql -d $DBNAME -a -c "select cleanup_dump_data('yaml')"
 
 echo Cleaning up
 dropdb -e $DBNAME

@@ -1,8 +1,8 @@
 CREATE ROLE yaml;
 
 -- Because some data can
-CREATE OR REPLACE PROCEDURE cleanup_dump_data(IN from_role varchar)
-    LANGUAGE plpgsql AS $$
+CREATE OR REPLACE FUNCTION cleanup_dump_data(IN from_role varchar)
+    RETURNS varchar AS $$
 DECLARE
     decom_from varchar := from_role || '_decom';
 BEGIN
@@ -11,7 +11,9 @@ BEGIN
         EXECUTE 'DROP OWNED BY ' || decom_from || ';';
         EXECUTE 'DROP ROLE IF EXISTS ' || decom_from || ';';
     END IF;
-END $$;
+    RETURN 'OK';
+END
+$$ LANGUAGE plpgsql;
 
 -- Refining original fuzzwork including schema rename, filtering objects and creating missing indexes
 CREATE OR REPLACE FUNCTION refine_dump_data(IN from_role varchar, IN to_schema varchar)
@@ -20,7 +22,7 @@ DECLARE
     r pg_tables%rowtype;
     i int := 0;
 BEGIN
-    CALL cleanup_dump_data(to_schema);
+    PERFORM cleanup_dump_data(to_schema);
     EXECUTE 'CREATE ROLE ' || to_schema || ';';
     EXECUTE 'CREATE SCHEMA ' || to_schema || ' AUTHORIZATION ' || to_schema || ';';
     FOR r IN

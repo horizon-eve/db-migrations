@@ -1,4 +1,6 @@
 # Horizon db migrations
+[![doks-staging](https://github.com/horizon-eve/db-migrations/actions/workflows/doks-staging.yml/badge.svg?branch=master)](https://github.com/horizon-eve/db-migrations/actions/workflows/doks-staging.yml)
+
 Database schemas and objects for horizon services. 
 ### Usage:
 1. db-migrate up # Applies commons and deployer, creates base roles and objects
