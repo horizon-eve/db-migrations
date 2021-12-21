@@ -1,0 +1,26 @@
+{
+  "name": "horizon-db-migrations",
+  "version": "1.0.0",
+  "description": "Horizon database schema migrations",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/horizon-eve/db.git"
+  },
+  "keywords": [
+    "db-migrate"
+  ],
+  "author": "Oleksandr Minaiev",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/horizon-eve/db/issues"
+  },
+  "homepage": "https://github.com/horizon-eve/db#readme",
+  "dependencies": {
+    "db-migrate": "^0.11.13",
+    "db-migrate-pg": "github:oleksm/pg"
+  }
+}

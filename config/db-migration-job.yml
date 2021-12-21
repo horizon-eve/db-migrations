@@ -1,0 +1,59 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: "db-migration-job"
+  labels:
+  annotations:
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      name: "migration-job-pod"
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: db-migrations
+          image: <IMAGE>
+          env:
+            - name: PGHOST
+              value: postgres-service
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secrets
+                  key: postgres-user
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secrets
+                  key: postgres-password
+            - name: PGDATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secrets
+                  key: postgres-db
+            - name: AUTHPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secrets
+                  key: auth-password
+            - name: APIPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secrets
+                  key: api-password
+            - name: APISUPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secrets
+                  key: apisu-password
+            - name: ESIPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secrets
+                  key: esi-password
+          resources:
+            requests:
+              cpu: 100m
+            limits:
+              cpu: 100m

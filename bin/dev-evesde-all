@@ -1,0 +1,28 @@
+#!/bin/bash
+set -e
+
+BASEDIR=$(dirname "$0")
+
+TMP_DB_TEMPLATE=evesde0
+TMP_DB_NAME=evesdetmp
+INTAKE_SCHEMA=evesde_intake
+ORIGINAL_DUMP=postgres-latest.dmp
+INTAKE_DUMP=${INTAKE_SCHEMA}.dmp
+
+MD5=$(curl https://www.fuzzwork.co.uk/dump/${ORIGINAL_DUMP}.bz2.md5)
+echo latest fuzzwork md5: $MD5
+is_upgrade_needed=(`psql -t -b -c "select is_upgrade_needed('${MD5}');"`)
+echo is_upgrade_needed: $is_upgrade_needed
+if [[ "$is_upgrade_needed" == "yes" ]]; then
+  echo Refresh $TMP_DB_TEMPLATE
+  $BASEDIR/initevesde0 $TMP_DB_TEMPLATE
+
+  echo download latest evesde dump
+  $BASEDIR/get-evesde-fuzzwork $ORIGINAL_DUMP
+
+  echo Prepare evesde intake
+  $BASEDIR/prepare-evesde-intake $ORIGINAL_DUMP $TMP_DB_NAME $TMP_DB_TEMPLATE $INTAKE_SCHEMA $INTAKE_DUMP
+
+  echo Deploy intake dump
+  $BASEDIR/deploy-evesde $INTAKE_SCHEMA $INTAKE_DUMP "$MD5"
+fi

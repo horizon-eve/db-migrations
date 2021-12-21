@@ -1,0 +1,12 @@
+#!/bin/sh
+set -e
+
+BASEDIR=$(dirname "$0")
+DBNAME=$1
+
+# Drop $DBNAME if exists
+dropdb --if-exists -e $DBNAME
+# Create $DBNAME template
+createdb -e $DBNAME
+# Create objects
+psql -d $DBNAME -b -f $BASEDIR/sql/${DBNAME}.sql

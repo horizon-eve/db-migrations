@@ -1,0 +1,31 @@
+#!/bin/sh
+set -e
+DUMP_FILE=$1
+DBNAME=$2
+DBTEMPLATE=$3
+SCHEMANAME=$4
+INTAKE_DUMP=$5
+
+dropdb --if-exists $DBNAME
+
+echo Create import db
+createdb -e -T $DBTEMPLATE $DBNAME
+dropdb -e $DBTEMPLATE
+
+echo Import fuzzwork dump $DUMP_FILE
+pg_restore -ev -d $DBNAME $DUMP_FILE
+
+echo Tables postprocessing and ownership changes
+psql -d $DBNAME -a -c "select refine_dump_data('yaml', '${SCHEMANAME}')"
+
+echo Create refined dump $INTAKE_DUMP
+pg_dump -v -d $DBNAME -Fc --schema=$SCHEMANAME -f $INTAKE_DUMP
+
+echo Decom evesd0 data
+psql -d $DBNAME -a -c "call cleanup_dump_data('${SCHEMANAME}')"
+psql -d $DBNAME -a -c "call cleanup_dump_data('${$DBNAME}')"
+psql -d $DBNAME -a -c "call cleanup_dump_data('yaml')"
+
+echo Cleaning up
+dropdb -e $DBNAME
+rm $DUMP_FILE
