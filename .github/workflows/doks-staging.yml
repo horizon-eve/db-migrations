@@ -51,7 +51,7 @@ jobs:
         run: kubectl apply -f $GITHUB_WORKSPACE/config/db-migration-job.yml
 
       - name: Verify job completeion
-        run: kubectl wait --for=condition=Completed --timeout=120s job/db-migration-job
+        run: kubectl wait --for=condition=complete --timeout=120s job/db-migration-job
 
       - name: Cleanup job
         run: kubectl delete job/db-migration-job
