@@ -55,5 +55,3 @@ jobs:
 
       - name: Cleanup job
         run: kubectl delete job/db-migration-job
-
-
