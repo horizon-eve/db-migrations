@@ -12,6 +12,11 @@ on:
       - 'Dockerfile'
       - '.github/workflows/**'
       - 'migrations/**'
+      - 'package.json'
+      - 'Dockerfile'
+      - 'package-lock.json'
+      - 'run-migrations.sh'
+      - 'database.json'
 
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
