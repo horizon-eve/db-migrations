@@ -8,6 +8,7 @@ create table auth_session (
                               user_agent character varying(2048),
                               redirect_url character varying(2048) not null,
                               client_verify character varying(128) not null UNIQUE,
+                              user_id character varying(20),
                               created timestamp not null default CURRENT_TIMESTAMP,
                               updated timestamp not null default CURRENT_TIMESTAMP,
                               committed numeric(1) not null default 0
@@ -17,7 +18,7 @@ ALTER TABLE auth_session OWNER TO auth;
 create table character_token (
                                  access_token character varying(256) primary key,
                                  character_id integer not null,
-                                 session_id character varying(100) not null references auth_session(session_id),
+                                 session_id character varying(100) references auth_session(session_id),
                                  token_type character varying(100) not null,
                                  scopes character varying(4000),
                                  created timestamp not null default CURRENT_TIMESTAMP,
@@ -53,12 +54,15 @@ ALTER TABLE user_token OWNER TO auth;
 
 create table characters (
                             character_id integer primary key,
-                            user_id character varying(20) not null references users(user_id),
+                            user_id character varying(20) references users(user_id),
                             owner_hash character varying (100) not null,
                             character_name character varying (100) not null,
                             created timestamp not null default CURRENT_TIMESTAMP
 );
 ALTER TABLE characters OWNER TO auth;
+GRANT SELECT ON characters TO authenticated;
+CREATE POLICY access_my_characters ON characters TO authenticated USING (user_id = current_user);
+
 
 -- Trigger Procedure to create a new pg user
 create or replace function create_user()
@@ -74,6 +78,7 @@ CREATE TRIGGER insert_user
     AFTER INSERT ON users
     FOR EACH ROW
 EXECUTE PROCEDURE create_user();
+
 
 -- Trigger Procedure to send character_info auth event
 create or replace function notify_character_info()
@@ -106,12 +111,14 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+
 CREATE TYPE auth_info AS (
                              access_token varchar,
                              token_type varchar,
                              expires_in integer,
                              refresh_token varchar
                          );
+
 
 CREATE TYPE char_info AS (
                              "CharacterID" integer,
@@ -135,6 +142,7 @@ DECLARE
     lowner_hash varchar;
     lowner_hash_old varchar;
     luser_id varchar;
+    llink_user_id varchar;
     luser_token varchar;
     lexpires timestamp;
 BEGIN
@@ -144,8 +152,8 @@ BEGIN
     end if;
 
     -- fetch and commit the session
-    select session_id, auth_info, char_info, user_agent
-    into lsession_id, lauth_info, lchar_info, luser_agent
+    select session_id, auth_info, char_info, user_agent, user_id
+    into lsession_id, lauth_info, lchar_info, luser_agent, llink_user_id
     from auth_session
     where client_verify = pclient_verify and committed = 0;
 
@@ -153,6 +161,7 @@ BEGIN
         RAISE EXCEPTION 'No authorization to verify %', pclient_verify;
     end if;
 
+    -- Commit session so it can not be used again
     update auth_session set committed = 1, updated = CURRENT_TIMESTAMP where session_id = lsession_id;
 
     if puser_agent <> luser_agent then
@@ -173,31 +182,57 @@ BEGIN
     from characters
     where character_id = lcharacter_id;
 
-    if lowner_hash_old is null then
-        -- This is a new character, create user record first
-        insert into users (character_id) values (lcharacter_id) returning user_id into luser_id;
+    -- The character did not belong to any users, proceed adding to a new or link user
+    if luser_id is null then
+        -- New user
+        if llink_user_id is null then
+            -- This is a new character, create user record first
+            insert into users (character_id) values (lcharacter_id) returning user_id into luser_id;
+        else
+            -- Link user
+            luser_id := llink_user_id;
+        end if;
         -- Now finish with character
         insert into characters (character_id, user_id, owner_hash, character_name)
-        values (lcharacter_id, luser_id, lowner_hash, lcharacter_name);
+        values (lcharacter_id, luser_id, lowner_hash, lcharacter_name)
+        on conflict (character_id)
+            do
+                update set user_id = luser_id, owner_hash = lowner_hash;
     else
-        -- Existing character, see if the owner has changed
-        if lowner_hash <> lowner_hash_old then
-            -- Unlink character from the old user
-            update users set character_id = null where user_id = luser_id;
-            -- Create new user for this character
-            insert into users (character_id) values (lcharacter_id) returning user_id into luser_id;
+        -- Signing in to existing user
+        if llink_user_id is null then
+            -- Character was transferred to another account, unlink the old one
+            if lowner_hash <> lowner_hash_old then
+                -- Unlink character from the old user
+                update users set character_id = null where user_id = luser_id;
+                -- Create new user for this character
+                insert into users (character_id) values (lcharacter_id) returning user_id into luser_id;
+                -- Update character to new user
+                update characters set user_id = luser_id, owner_hash = lowner_hash where character_id = lcharacter_id;
+            end if;
+        else
+            -- Linking to existing user but the character already belongs to another user.
+            -- The only valid scenario would be if Character was transferred to another account so relink it to the other user
+            if lowner_hash <> lowner_hash_old then
+                -- Unlink character from the old user
+                update users set character_id = null where user_id = luser_id;
+                -- Link user
+                luser_id := llink_user_id;
+                -- Update character to new user
+                update characters set user_id = luser_id, owner_hash = lowner_hash where character_id = lcharacter_id;
+            else
+                RAISE EXCEPTION 'This character already belongs to another user. Log in as character and unlink it before adding to this user. %', lcharacter_id;
+            end if;
         end if;
     end if;
 
     -- at this point, we should be done with user. Just double check for dev(me) mistake
     if luser_id is null then
-        RAISE EXCEPTION 'User was not created for character(sorry about that) %', lchar_info;
+        RAISE EXCEPTION 'User was not created for character(sorry about that) %', lcharacter_id;
     end if;
 
     -- Create character_token record
-    insert into character_token (access_token, character_id, session_id, token_type, scopes, expires, refresh_token)
-    select access_token, lcharacter_id, lsession_id, token_type, lscopes, lcharacter_expires, refresh_token
-    from json_populate_record(null::auth_info, lauth_info::json);
+    PERFORM from insert_character_token(lcharacter_id, lsession_id, lauth_info, lscopes);
 
     -- The last step - User Token
     select token, expires
@@ -219,15 +254,18 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+
 -- User Authentication
-CREATE OR REPLACE FUNCTION authenticate(IN paccess_token varchar, IN pdevice varchar)
+CREATE OR REPLACE FUNCTION authenticate(IN paccess_token varchar, IN pdevice varchar, IN set_session boolean DEFAULT true)
     RETURNS varchar AS $$
 DECLARE
     luser_id varchar;
 BEGIN
-    SET SESSION AUTHORIZATION DEFAULT;
+    if set_session then
+        SET SESSION AUTHORIZATION DEFAULT;
+    end if;
     if paccess_token is null or pdevice is null then
-        RAISE EXCEPTION 'User was unable to authenticate % %', paccess_token, pdevice;
+        RAISE EXCEPTION 'User was unable to authenticate';
     end if;
     -- The last step - User Token
     select user_id
@@ -241,13 +279,18 @@ BEGIN
     limit 1;
     -- make sure user is found
     if luser_id is null then
-        RAISE EXCEPTION 'User was unable to authenticate % %', paccess_token, pdevice;
+        RAISE EXCEPTION 'User was unable to authenticate';
     end if;
     -- Set session to the user id
-    EXECUTE 'SET SESSION AUTHORIZATION ' || luser_id || ';';
-    return current_user;
+    if set_session then
+        EXECUTE 'SET SESSION AUTHORIZATION ' || luser_id || ';';
+        return current_user;
+    else
+        return luser_id;
+    end if;
 END;
 $$ LANGUAGE plpgsql;
+
 
 -- End authentication
 CREATE OR REPLACE FUNCTION end_authentication()
@@ -258,13 +301,101 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- CHR Token Refresh
-CREATE OR REPLACE FUNCTION refresh_character_token(IN pauth_info varchar, IN pdevice varchar)
+
+-- User token refresh
+CREATE OR REPLACE FUNCTION refresh_user_token(IN paccess_token varchar, IN pdevice varchar)
     RETURNS varchar AS $$
+DECLARE
+    luser_id varchar;
+    luser_token varchar;
 BEGIN
-    -- Create character_token record
-    insert into character_token (access_token, character_id, session_id, token_type, scopes, expires, refresh_token)
-    select access_token, lcharacter_id, lsession_id, token_type, lscopes, lcharacter_expires, refresh_token
-    from json_populate_record(null::auth_info, pauth_info::json);
+    if paccess_token is null or pdevice is null then
+        RAISE EXCEPTION 'User was unable to authenticate';
+    end if;
+
+    -- Get the last used and expired less than a week ago
+    select user_id
+    into luser_id
+    from user_token
+    where token = paccess_token
+      and device = pdevice
+      and valid = 1
+      and expires < CURRENT_TIMESTAMP
+      and expires + (interval '1 week') > CURRENT_TIMESTAMP
+    order by expires desc
+    limit 1;
+
+    -- make sure user is found
+    if luser_id is null then
+        RAISE EXCEPTION 'User was unable to authenticate';
+    end if;
+
+    insert into user_token(token, user_id, device, expires, refresh_token)
+    values (random_string(30), luser_id, pdevice, CURRENT_TIMESTAMP + interval '1 day', paccess_token)
+    returning token into luser_token;
+
+    return '{"user_id": "' || luser_id || '", "auth_token": "' || luser_token || '"}';
 END;
 $$ LANGUAGE plpgsql;
+
+-- Fetch character token
+CREATE OR REPLACE FUNCTION get_character_token(IN pcharacter_id varchar, IN puser_id varchar default current_user)
+    RETURNS varchar AS $$
+DECLARE
+    lcharacter_token varchar;
+    lexpires timestamp;
+BEGIN
+    select ct.character_token, ct.valid, ct.expires
+    into lcharacter_token, lexpires
+    from character_token ct
+             join characters cr
+                  on cr.character_id = ct.character_id
+                      and cr.character_id = pcharacter_id
+                      and cr.user_id = puser_id
+    where ct.valid = 1
+    order by ct.created
+    limit 1;
+
+    if lcharacter_token is not null then
+        return '{"user_id": "' || puser_id || '", "character_id": "' || pcharacter_id || '", "user_id": "' || puser_id || '", "character_token": "' || lcharacter_token || '", "expires": "' || lexpires || '"}';
+    else
+        return null;
+    end if;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Insert character token
+CREATE OR REPLACE FUNCTION insert_character_token(IN pcharacter_id integer, IN lsession_id varchar, IN pauth_info varchar, IN pscopes varchar default null)
+    RETURNS varchar AS $$
+DECLARE
+    lscopes varchar;
+    lauth_info auth_info;
+BEGIN
+    -- parse auth info
+    select * into lauth_info
+    from json_populate_record(null::auth_info, pauth_info::json);
+
+    -- copy scopes from previous token if available
+    if pscopes is null and lauth_info.refresh_token is not null then
+        select scopes into lscopes
+        from character_token
+        where access_token = lauth_info.refresh_token;
+    else
+        lscopes := pscopes;
+    end if;
+
+    -- Insert new token
+    insert into character_token (access_token, character_id, session_id, token_type, scopes, expires, refresh_token)
+    values (lauth_info.access_token, pcharacter_id, lsession_id, lauth_info.token_type, lscopes,
+            current_timestamp + lauth_info.expires_in * interval '1 second', lauth_info.refresh_token);
+    return 'OK';
+END;
+$$ LANGUAGE plpgsql;
+
+ALTER FUNCTION authenticate OWNER TO auth;
+ALTER FUNCTION end_authentication OWNER TO auth;
+ALTER FUNCTION get_character_token OWNER TO auth;
+ALTER FUNCTION insert_character_token OWNER TO auth;
+ALTER FUNCTION random_string OWNER TO auth;
+ALTER FUNCTION refresh_user_token OWNER TO auth;
+ALTER FUNCTION user_sign_in OWNER TO auth;

@@ -47,7 +47,8 @@ BEGIN
     EXECUTE 'ALTER SCHEMA ' || intake_schema || ' RENAME TO evesde;';
     ALTER SCHEMA evesde OWNER TO evesde;
     -- Refresh memberships
-    GRANT evesde to api;
+    GRANT SELECT ON ALL TABLES IN SCHEMA evesde TO api;
+    GRANT USAGE ON SCHEMA evesde TO api;
 
     IF EXISTS(
             SELECT schema_name

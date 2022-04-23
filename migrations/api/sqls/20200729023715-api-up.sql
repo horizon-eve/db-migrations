@@ -1,5 +1,5 @@
 -- item search
-CREATE OR REPLACE VIEW itemsearch AS
+CREATE OR REPLACE VIEW item_type AS
 SELECT t."typeID"    AS type_id,
        t."typeName"  AS type_name,
        g."groupName" AS group_name,
@@ -9,13 +9,13 @@ FROM evesde."invTypes" t
          JOIN evesde."invCategories" c ON c."categoryID" = g."categoryID" and c."categoryID" not in (9, 91)
 WHERE t.published = true
   AND t."marketGroupID" IS NOT NULL;
-ALTER VIEW itemsearch OWNER TO api;
-
+ALTER VIEW item_type OWNER TO api;
 
 -- users
 create or replace view users as
 select user_id, character_id from auth.users;
 ALTER VIEW users OWNER TO authenticated;
+
 
 -- Item Lists
 CREATE SEQUENCE seq_itemlist START 10000000;

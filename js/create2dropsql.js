@@ -1,7 +1,7 @@
 /**
  * Generates reverse drop script from create pg sql
  * USAGE
- * node js/crease2dropsql.js <create.sql>
+ * node js/create2dropsql.js <create.sql>
  *
  */
 const fs = require('fs')
