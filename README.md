@@ -9,8 +9,6 @@ Follow this guide to add new migrations: https://db-migrate.readthedocs.io/en/la
 `db-migrate create:<scope> <migration_name> --sql-file`
 
 Available scopes: ```auth```,```esi```,```api```,```all```.
-
-For moredetails, see package documentation: https://db-migrate.readthedocs.io/en/latest/Getting%20Started/usage/ 
 ### Order of applicaton:
 1. db-migrate up # Applies commons and deployer, creates base roles and objects
 2. db-migrate up:auth # Auth Schema defs
