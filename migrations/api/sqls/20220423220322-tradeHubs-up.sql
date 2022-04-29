@@ -7,12 +7,12 @@ CREATE TABLE market_watch_list
     name varchar(1024) not null,
     description varchar(1024),
     items jsonb not null,
-    price_filter numeric(2,2),
+    price_filter numeric(4,2),
     user_id varchar(20) not null references auth.users(user_id) DEFAULT current_user,
     created timestamp not null DEFAULT CURRENT_TIMESTAMP,
     updated timestamp not null DEFAULT CURRENT_TIMESTAMP
 );
-ALTER TABLE market_watch_list OWNER TO api;
+ALTER TABLE market_watch_list OWNER TO apisu;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE market_watch_list TO authenticated;
 ALTER TABLE market_watch_list ENABLE ROW LEVEL SECURITY;
 CREATE POLICY my_market_watch_list ON market_watch_list TO authenticated USING (user_id = current_user);

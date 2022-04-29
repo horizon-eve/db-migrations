@@ -23,7 +23,7 @@ create table character_token (
                                  scopes character varying(4000),
                                  created timestamp not null default CURRENT_TIMESTAMP,
                                  expires timestamp not null,
-                                 refresh_token character varying(256) references character_token(access_token),
+                                 refresh_token character varying(256),
                                  valid numeric(1) not null default 1
 );
 ALTER TABLE character_token OWNER TO auth;
@@ -70,6 +70,7 @@ create or replace function create_user()
 BEGIN
     EXECUTE 'CREATE ROLE ' || NEW.user_id || ';';
     EXECUTE 'GRANT AUTHENTICATED TO ' || NEW.user_id || ';';
+    EXECUTE 'GRANT ' || NEW.user_id || ' TO esi;';
     RETURN NULL;
 END;
 $$ LANGUAGE plpgsql;
@@ -212,7 +213,7 @@ BEGIN
             end if;
         else
             -- Linking to existing user but the character already belongs to another user.
-            -- The only valid scenario would be if Character was transferred to another account so relink it to the other user
+            -- The only valid scenario would be if Character was transferred to another account so unlink it from previous owner
             if lowner_hash <> lowner_hash_old then
                 -- Unlink character from the old user
                 update users set character_id = null where user_id = luser_id;
@@ -254,6 +255,35 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- Exchange user token for user id if session is valid
+CREATE OR REPLACE FUNCTION exchange_user_token(IN paccess_token varchar, IN pdevice varchar) RETURNS varchar
+    SECURITY DEFINER AS $$
+select user_id
+from auth.user_token
+where token = paccess_token
+  and device = pdevice
+  and valid = 1
+  and expires > CURRENT_TIMESTAMP
+order by expires desc
+limit 1;
+$$ LANGUAGE SQL;
+GRANT EXECUTE ON FUNCTION exchange_user_token TO esi;
+
+-- Exchange user token for user id if session is valid
+CREATE OR REPLACE FUNCTION exchange_character_token(IN puser_id varchar, IN pcharacter_id integer, IN pscope varchar) RETURNS varchar
+    SECURITY DEFINER AS $$
+select access_token
+from auth.character_token ct
+         join auth.characters c on ct.character_id = c.character_id
+    and c.user_id = puser_id
+where ct.character_id = pcharacter_id
+  and ct.valid = 1
+  and ct.expires > CURRENT_TIMESTAMP
+  and scopes like '%' || pscope || '%'
+order by ct.created desc
+limit 1;
+$$ LANGUAGE SQL;
+GRANT EXECUTE ON FUNCTION exchange_character_token TO esi;
 
 -- User Authentication
 CREATE OR REPLACE FUNCTION authenticate(IN paccess_token varchar, IN pdevice varchar, IN set_session boolean DEFAULT true)
@@ -267,16 +297,9 @@ BEGIN
     if paccess_token is null or pdevice is null then
         RAISE EXCEPTION 'User was unable to authenticate';
     end if;
-    -- The last step - User Token
-    select user_id
-    into luser_id
-    from auth.user_token
-    where token = paccess_token
-      and device = pdevice
-      and valid = 1
-      and expires > CURRENT_TIMESTAMP
-    order by expires desc
-    limit 1;
+
+    luser_id := auth.exchange_user_token(paccess_token, pdevice);
+
     -- make sure user is found
     if luser_id is null then
         RAISE EXCEPTION 'User was unable to authenticate';
@@ -290,7 +313,35 @@ BEGIN
     end if;
 END;
 $$ LANGUAGE plpgsql;
+GRANT EXECUTE ON FUNCTION authenticate TO esi;
 
+-- User Authentication with character info
+CREATE OR REPLACE FUNCTION authenticate_character_in_scope(IN puser_token varchar, IN pdevice varchar, IN pcharacter_id integer, IN pscope varchar)
+    RETURNS varchar AS $$
+DECLARE
+    luser_id varchar;
+    lcharacter_token varchar;
+BEGIN
+    if pcharacter_id is null or pscope is null then
+        RAISE EXCEPTION 'Character was unable to authenticate';
+    end if;
+
+    -- exchange to user id
+    luser_id := auth.authenticate(puser_token, pdevice, false);
+
+    if luser_id is null then
+        RAISE EXCEPTION 'User was unable to authenticate';
+    end if;
+
+    lcharacter_token := auth.exchange_character_token(luser_id, pcharacter_id, pscope);
+
+    if lcharacter_token is not null then
+        EXECUTE 'SET ROLE ' || luser_id || ';';
+    end if;
+    return lcharacter_token;
+END;
+$$ LANGUAGE plpgsql;
+GRANT EXECUTE ON FUNCTION authenticate_character_in_scope TO esi;
 
 -- End authentication
 CREATE OR REPLACE FUNCTION end_authentication()
@@ -300,7 +351,7 @@ BEGIN
     return current_user;
 END;
 $$ LANGUAGE plpgsql;
-
+GRANT EXECUTE ON FUNCTION end_authentication TO esi;
 
 -- User token refresh
 CREATE OR REPLACE FUNCTION refresh_user_token(IN paccess_token varchar, IN pdevice varchar)
@@ -399,3 +450,6 @@ ALTER FUNCTION insert_character_token OWNER TO auth;
 ALTER FUNCTION random_string OWNER TO auth;
 ALTER FUNCTION refresh_user_token OWNER TO auth;
 ALTER FUNCTION user_sign_in OWNER TO auth;
+ALTER FUNCTION authenticate_character_in_scope OWNER TO auth;
+ALTER FUNCTION exchange_user_token OWNER TO auth;
+ALTER FUNCTION exchange_character_token OWNER TO auth;
