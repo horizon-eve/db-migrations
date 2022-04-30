@@ -11,7 +11,5 @@ CREATE SCHEMA AUTHORIZATION api;
 CREATE SCHEMA AUTHORIZATION esi;
 GRANT USAGE ON SCHEMA auth TO authenticated;
 GRANT USAGE ON SCHEMA esi TO authenticated;
-GRANT USAGE ON SCHEMA api TO api_readonly;
 GRANT USAGE ON SCHEMA auth TO esi;
-GRANT api to api_readonly;
 GRANT api to authenticated;
